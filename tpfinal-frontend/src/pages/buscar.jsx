@@ -1,0 +1,493 @@
+import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from "react-leaflet";
+import L from "leaflet";
+import { buscarClases, buscarProfesores, obtenerAreas, obtenerMaterias, obtenerPerfilProfesor } from "../services/api";
+import professorImage from "../assets/profesor.png";
+import ProfessorCard from "../components/ProfessorCard";
+import Navbar from "../components/Navbar";
+import { formatearFecha, formatearHora, formatearPrecio } from "../utils/fechas";
+import "leaflet/dist/leaflet.css";
+
+const DEFAULT_CENTER = [-34.6037, -58.3816];
+const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY;
+const MAPTILER_TILES = {
+  url: `https://api.maptiler.com/maps/streets-v4/{z}/{x}/{y}.png?key=${MAPTILER_KEY}`,
+  attribution: '&copy; MapTiler &copy; OpenStreetMap contributors',
+};
+const CARTO_TILES = {
+  url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+  attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+};
+
+const professorIcon = L.divIcon({
+  className: "professor-marker-wrapper",
+  html: `<span class="professor-marker"><img src="${professorImage}" alt="" /></span>`,
+  iconSize: [42, 42],
+  iconAnchor: [21, 21],
+});
+
+function calculateDistanceInKm([fromLatitude, fromLongitude], professor) {
+  const latitude = Number(professor.latitud_prof);
+  const longitude = Number(professor.longitud_prof);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+  const earthRadius = 6371;
+  const toRadians = (degrees) => degrees * (Math.PI / 180);
+  const latitudeDelta = toRadians(latitude - fromLatitude);
+  const longitudeDelta = toRadians(longitude - fromLongitude);
+  const haversine = Math.sin(latitudeDelta / 2) ** 2
+    + Math.cos(toRadians(fromLatitude))
+    * Math.cos(toRadians(latitude))
+    * Math.sin(longitudeDelta / 2) ** 2;
+
+  return 2 * earthRadius * Math.asin(Math.sqrt(haversine));
+}
+
+function CenterOnLocation({ location }) {
+  const map = useMap();
+  const centered = useRef(false);
+
+  useEffect(() => {
+    if (location && !centered.current) {
+      map.flyTo(location, 13, { duration: 1.2 });
+      centered.current = true;
+    }
+  }, [location, map]);
+
+  return null;
+}
+
+function MapMovement({ onMove }) {
+  const map = useMapEvents({
+    moveend() {
+      const mapCenter = map.getCenter();
+      onMove([mapCenter.lat, mapCenter.lng]);
+    },
+  });
+  return null;
+}
+
+function ProfessorMapCard({ professor, onClose }) {
+  const map = useMap();
+  const [position, setPosition] = useState(null);
+
+  useEffect(() => {
+    const updatePosition = () => {
+      const latitude = Number(professor.latitud_prof);
+      const longitude = Number(professor.longitud_prof);
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+
+      const point = map.latLngToContainerPoint([latitude, longitude]);
+      setPosition({ left: point.x, top: point.y });
+    };
+
+    updatePosition();
+    map.on("move zoom", updatePosition);
+    return () => map.off("move zoom", updatePosition);
+  }, [map, professor.latitud_prof, professor.longitud_prof]);
+
+  if (!position) return null;
+
+  return (
+    <div
+      className="map-professor-card"
+      style={{ left: position.left, top: position.top }}
+    >
+      <ProfessorCard professor={professor} onClose={onClose} />
+    </div>
+  );
+}
+
+function getBrowserLocation() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) {
+      resolve({ location: DEFAULT_CENTER, source: "default" });
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => resolve({
+        location: [coords.latitude, coords.longitude],
+        source: "browser",
+      }),
+      () => resolve({ location: DEFAULT_CENTER, source: "default" }),
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 },
+    );
+  });
+}
+
+export default function Buscar() {
+  const navigate = useNavigate();
+  const [tileProvider, setTileProvider] = useState(MAPTILER_KEY ? "maptiler" : "carto");
+  const [location, setLocation] = useState(DEFAULT_CENTER);
+  const [userLocation, setUserLocation] = useState(DEFAULT_CENTER);
+  const [locationSource, setLocationSource] = useState("loading");
+  const [profesores, setProfesores] = useState([]);
+  const [selectedProfessor, setSelectedProfessor] = useState(null);
+  const [searchingProfessors, setSearchingProfessors] = useState(false);
+  const [materias, setMaterias] = useState([]);
+  const [areas, setAreas] = useState([]);
+  const [selectedMateria, setSelectedMateria] = useState("");
+  const [selectedArea, setSelectedArea] = useState("");
+  const [openFilter, setOpenFilter] = useState(null);
+  const [error, setError] = useState("");
+  const [mode, setMode] = useState("profesores");
+  const [classQuery, setClassQuery] = useState("");
+  const [classResults, setClassResults] = useState([]);
+  const [classSearchDone, setClassSearchDone] = useState(false);
+  const [searchingClasses, setSearchingClasses] = useState(false);
+
+  async function loadProfessors(mapCenter, filters = {}) {
+    setSearchingProfessors(true);
+    try {
+      const response = await buscarProfesores(mapCenter[0], mapCenter[1], 100, filters);
+      setProfesores(response.profesores || []);
+      setError("");
+    } catch (err) {
+      setError(err.message || "No se pudieron cargar los profesores.");
+    } finally {
+      setSearchingProfessors(false);
+    }
+  }
+
+  async function loadClasses(mapCenter, query = classQuery) {
+    if (!query.trim()) {
+      setClassResults([]);
+      setClassSearchDone(false);
+      return;
+    }
+
+    setSearchingClasses(true);
+    try {
+      const response = await buscarClases(query.trim(), mapCenter[0], mapCenter[1], 100);
+      setClassResults(response.clases || []);
+      setClassSearchDone(true);
+      setError("");
+    } catch (err) {
+      setError(err.message || "No se pudieron buscar las clases.");
+    } finally {
+      setSearchingClasses(false);
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+
+    getBrowserLocation().then(async (result) => {
+      if (!active) return;
+      setLocation(result.location);
+      setUserLocation(result.location);
+      setLocationSource(result.source);
+      await loadProfessors(result.location);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    Promise.all([obtenerMaterias(), obtenerAreas()])
+      .then(([materiasResponse, areasResponse]) => {
+        if (!active) return;
+        setMaterias(materiasResponse.materias || []);
+        setAreas(areasResponse.areas || []);
+      })
+      .catch((err) => {
+        if (active) setError(err.message);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function handleMapMove(mapCenter) {
+    setLocation(mapCenter);
+    if (mode === "clases") {
+      await loadClasses(mapCenter);
+    } else {
+      await loadProfessors(mapCenter, {
+        idMateria: selectedMateria,
+        idArea: selectedArea,
+      });
+    }
+  }
+
+  async function handleFilterChange(nextFilters) {
+    setSelectedMateria(nextFilters.idMateria);
+    setSelectedArea(nextFilters.idArea);
+    setOpenFilter(null);
+    await loadProfessors(location, nextFilters);
+  }
+
+  async function handleClassSearch(event) {
+    event.preventDefault();
+    await loadClasses(location);
+  }
+
+  function changeMode(nextMode) {
+    setMode(nextMode);
+    setSelectedProfessor(null);
+    setError("");
+    if (nextMode === "profesores") {
+      setClassResults([]);
+      setClassSearchDone(false);
+      loadProfessors(location, {
+        idMateria: selectedMateria,
+        idArea: selectedArea,
+      });
+    }
+  }
+
+  const selectedMateriaName = materias.find(
+    (materia) => String(materia.id_materia) === String(selectedMateria),
+  )?.nombreMateria || "Materias";
+  const selectedAreaName = areas.find(
+    (area) => String(area.id_area) === String(selectedArea),
+  )?.nombreArea || "Áreas";
+
+  async function handleProfessorClick(professor) {
+    try {
+      const response = await obtenerPerfilProfesor(professor.id_profesor);
+      const profile = response.perfil || {};
+      setSelectedProfessor({
+        ...professor,
+        ...profile,
+        distancia: calculateDistanceInKm(userLocation, professor) ?? professor.distancia ?? profile.distancia,
+        tarifa: profile.tarifa ?? professor.tarifa,
+        materias: [
+          ...(professor.materias || []),
+          ...(profile.materias || []),
+        ],
+      });
+    } catch {
+      setSelectedProfessor({
+        ...professor,
+        distancia: calculateDistanceInKm(userLocation, professor) ?? professor.distancia,
+      });
+    }
+  }
+
+  const mapTiles = tileProvider === "maptiler" ? MAPTILER_TILES : CARTO_TILES;
+
+  return (
+    <main className="map-page">
+      <Navbar />
+
+      <section className="map-shell" aria-label="Mapa interactivo">
+        <div className="map-mode-switch" role="tablist" aria-label="Tipo de búsqueda">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "profesores"}
+            className={mode === "profesores" ? "active" : ""}
+            onClick={() => changeMode("profesores")}
+          >
+            Buscar profesores
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "clases"}
+            className={mode === "clases" ? "active" : ""}
+            onClick={() => changeMode("clases")}
+          >
+            Buscar clases
+          </button>
+        </div>
+        {mode === "clases" && (
+          <form className="map-class-search" onSubmit={handleClassSearch}>
+            <label htmlFor="class-search">¿Qué clase estás buscando?</label>
+            <div>
+              <input
+                id="class-search"
+                type="search"
+                value={classQuery}
+                onChange={(event) => setClassQuery(event.target.value)}
+                placeholder="Ej. clase de álgebra o lengua y literatura"
+                maxLength={100}
+              />
+              <button type="submit" disabled={searchingClasses || !classQuery.trim()}>
+                {searchingClasses ? "Buscando..." : "Buscar"}
+              </button>
+            </div>
+          </form>
+        )}
+        <div className="map-filters" aria-label="Filtros de búsqueda">
+          {mode === "profesores" && <><div className="map-filter">
+            <button
+              type="button"
+              className="map-filter-button"
+              aria-expanded={openFilter === "materia"}
+              onClick={() => setOpenFilter(openFilter === "materia" ? null : "materia")}
+            >
+              {selectedMateriaName}
+            </button>
+            {openFilter === "materia" && (
+              <div className="map-filter-menu" role="menu">
+                <button
+                  type="button"
+                  className={!selectedMateria ? "active" : ""}
+                  onClick={() => handleFilterChange({
+                    idMateria: "",
+                    idArea: selectedArea,
+                  })}
+                >
+                  Todas las materias
+                </button>
+              {materias.map((materia) => (
+                <button
+                  type="button"
+                  key={materia.id_materia}
+                  className={String(selectedMateria) === String(materia.id_materia) ? "active" : ""}
+                  onClick={() => handleFilterChange({
+                    idMateria: String(materia.id_materia),
+                    idArea: selectedArea,
+                  })}
+                >
+                  {materia.nombreMateria}
+                </button>
+              ))}
+              </div>
+            )}
+          </div>
+          <div className="map-filter">
+            <button
+              type="button"
+              className="map-filter-button"
+              aria-expanded={openFilter === "area"}
+              onClick={() => setOpenFilter(openFilter === "area" ? null : "area")}
+            >
+              {selectedAreaName}
+            </button>
+            {openFilter === "area" && (
+              <div className="map-filter-menu" role="menu">
+                <button
+                  type="button"
+                  className={!selectedArea ? "active" : ""}
+                  onClick={() => handleFilterChange({
+                    idMateria: selectedMateria,
+                    idArea: "",
+                  })}
+                >
+                  Todas las áreas
+                </button>
+              {areas.map((area) => (
+                <button
+                  type="button"
+                  key={area.id_area}
+                  className={String(selectedArea) === String(area.id_area) ? "active" : ""}
+                  onClick={() => handleFilterChange({
+                    idMateria: selectedMateria,
+                    idArea: String(area.id_area),
+                  })}
+                >
+                  {area.nombreArea}
+                </button>
+              ))}
+              </div>
+            )}
+          </div></>}
+        </div>
+        <div className="map-status-stack" aria-live="polite">
+          {locationSource === "loading" && (
+            <div className="map-loading">Buscando tu ubicación...</div>
+          )}
+          {locationSource === "default" && (
+            <div className="map-notice">
+              No pudimos obtener tu ubicación. Podés mover el mapa manualmente.
+            </div>
+          )}
+          {mode === "profesores" && searchingProfessors && (
+            <div className="map-loading">Buscando profesores en esta zona.</div>
+          )}
+          {mode === "clases" && searchingClasses && (
+            <div className="map-loading">Buscando clases en esta zona.</div>
+          )}
+        </div>
+        {mode === "clases" && classResults.length > 0 && (
+          <div className="map-class-results" aria-label="Resultados de clases">
+            {classResults.map((clase) => (
+              <button
+                type="button"
+                className="map-class-result"
+                key={clase.id_clase}
+                onClick={() => navigate(`/clases/${clase.id_clase}`, { state: { clase } })}
+              >
+                <strong>{clase.titulo}</strong>
+                <span>{clase.materia.nombre} · {clase.tema}</span>
+                <span>{clase.profesor.nombre} · {formatearPrecio(clase.precio)}</span>
+                <span>{formatearFecha(clase.inicio)} · {formatearHora(clase.inicio)} · {clase.distancia_km} km</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {mode === "clases" && classSearchDone && !searchingClasses && !classResults.length && (
+          <div className="map-class-empty" role="status">
+            No encontramos clases disponibles para “{classQuery}” en un radio de 100 km.
+            Probá con otra materia o mové el mapa hacia otra zona.
+          </div>
+        )}
+        <MapContainer
+          center={DEFAULT_CENTER}
+          zoom={12}
+          minZoom={3}
+          maxZoom={19}
+          scrollWheelZoom
+          dragging
+          zoomControl
+          className="professors-map"
+        >
+          <CenterOnLocation location={locationSource === "loading" ? null : location} />
+          <MapMovement onMove={handleMapMove} />
+          <TileLayer
+            key={tileProvider}
+            attribution={mapTiles.attribution}
+            url={mapTiles.url}
+            eventHandlers={{
+              tileerror: () => {
+                if (tileProvider === "maptiler") setTileProvider("carto");
+              },
+            }}
+          />
+          {mode === "profesores" && profesores.map((profesor) => (
+            <Marker
+              key={profesor.id_profesor}
+              position={[Number(profesor.latitud_prof), Number(profesor.longitud_prof)]}
+              icon={professorIcon}
+              eventHandlers={{ click: () => handleProfessorClick(profesor) }}
+            />
+          ))}
+          {mode === "profesores" && selectedProfessor && (
+            <ProfessorMapCard
+              professor={selectedProfessor}
+              onClose={() => setSelectedProfessor(null)}
+            />
+          )}
+        </MapContainer>
+        <div className="map-info-overlay">
+          <p className="map-results">
+            {mode === "clases"
+              ? (classResults.length
+                ? `${classResults.length} clases encontradas en el área visible.`
+                : "Buscá una clase para ver resultados.")
+              : profesores.length
+              ? `${profesores.length} profesores encontrados en el área visible.`
+              : "No hay profesores ubicados en esta zona."}
+          </p>
+          <p className="map-help">
+            {mode === "clases"
+              ? "Los resultados se ordenan por relevancia y distancia. Hacé clic en una clase para elegir el horario."
+              : "Arrastrá el mapa para explorar otras zonas. Hacé clic en un marcador para ver el perfil."}
+          </p>
+        </div>
+      </section>
+
+      {error && <p className="map-error" role="alert">{error}</p>}
+    </main>
+  );
+}
