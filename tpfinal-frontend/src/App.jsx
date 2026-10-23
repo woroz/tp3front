@@ -16,6 +16,7 @@ import CrearClaseProfesor from "./pages/crearClaseProfesor";
 import DetalleClase from "./pages/detalleClase";
 import MateriasProfesor from "./pages/materiasProfesor";
 import MiPerfil from "./pages/miPerfil";
+import GoogleExito from "./pages/googleExito";
 import { ClaseVirtual } from "./pages/ClaseVirtual";
 import "./styles/reservas.css";
 import "./styles/layout.css";
@@ -49,6 +50,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/auth/google/exito" element={<GoogleExito />} />
       <Route
         path="/buscar"
         element={

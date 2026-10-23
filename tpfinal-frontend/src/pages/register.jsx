@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Country, State } from "country-state-city";
 import { AuthLayout } from "../components/authLayout";
-import { register } from "../services/api";
+import { useAuth } from "../context/authContext";
+import { obtenerDatosGooglePendiente, register, registrarConGoogle } from "../services/api";
 
 export default function Register() {
   const [nombre, setNombre] = useState("");
@@ -17,19 +18,35 @@ export default function Register() {
   const [fieldErrors, setFieldErrors] = useState({});
   const [cargando, setCargando] = useState(false);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const { sesionDesdeRefresh } = useAuth();
+
+  const esGoogle = searchParams.get("google") === "1";
 
   const paises = useMemo(() => Country.getAllCountries(), []);
   const provincias = useMemo(() => (paisIso ? State.getStatesOfCountry(paisIso) : []), [paisIso]);
+
+  useEffect(() => {
+    if (!esGoogle) return;
+    obtenerDatosGooglePendiente()
+      .then((datos) => {
+        setEmail(datos.email);
+        setNombre(datos.nombre);
+      })
+      .catch((err) => setError(err.message));
+  }, [esGoogle]);
 
   async function handleSubmit(event) {
     event.preventDefault();
     setError("");
     const errors = {};
-    if (!nombre.trim()) errors.nombre = "El nombre es obligatorio";
-    if (!email.trim()) errors.email = "El email es obligatorio";
-    else if (!email.includes("@")) errors.email = "Ingresá un email válido";
-    if (!password) errors.password = "La contraseña es obligatoria";
-    else if (password.length < 6) errors.password = "Debe tener al menos 6 caracteres";
+    if (!esGoogle) {
+      if (!nombre.trim()) errors.nombre = "El nombre es obligatorio";
+      if (!email.trim()) errors.email = "El email es obligatorio";
+      else if (!email.includes("@")) errors.email = "Ingresá un email válido";
+      if (!password) errors.password = "La contraseña es obligatoria";
+      else if (password.length < 6) errors.password = "Debe tener al menos 6 caracteres";
+    }
     if (!direccion.trim()) errors.direccion = "La dirección es obligatoria";
     else if (direccion.trim().length < 7) errors.direccion = "Ingresá calle y número";
     if (!paisIso) errors.pais = "Elegí un país";
@@ -39,16 +56,18 @@ export default function Register() {
     if (Object.keys(errors).length) return;
 
     const pais = paises.find((p) => p.isoCode === paisIso)?.name ?? "";
+    const ubicacion = { pais, provincia: provincia.trim(), ciudad: ciudad.trim() };
 
     setCargando(true);
     try {
-      // La dirección va solo con calle y número: el servidor le suma ciudad, provincia y país.
-      await register(email, password, nombre, rol, direccion.trim(), {
-        pais,
-        provincia: provincia.trim(),
-        ciudad: ciudad.trim(),
-      });
-      navigate("/login");
+      if (esGoogle) {
+        await registrarConGoogle(rol, direccion.trim(), ubicacion);
+        const payload = await sesionDesdeRefresh();
+        navigate(payload.rol === "alumno" ? "/buscar" : "/profesor");
+      } else {
+        await register(email, password, nombre, rol, direccion.trim(), ubicacion);
+        navigate("/login");
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -63,8 +82,12 @@ export default function Register() {
         Volver al inicio de sesión
       </Link>
       <div className="auth-heading">
-        <h1>Crear cuenta</h1>
-        <p>Elegi si vas a aprender o a enseñar en MentorAr.</p>
+        <h1>{esGoogle ? "Completá tu registro" : "Crear cuenta"}</h1>
+        <p>
+          {esGoogle
+            ? "Ya tenemos tu nombre y email de Google. Faltan unos datos."
+            : "Elegi si vas a aprender o a enseñar en MentorAr."}
+        </p>
       </div>
 
       <form onSubmit={handleSubmit} className="auth-form" noValidate>
@@ -85,6 +108,7 @@ export default function Register() {
           required
           maxLength={30}
           autoComplete="name"
+          readOnly={esGoogle}
           value={nombre}
           onChange={(event) => setNombre(event.target.value)}
           placeholder="Tu nombre completo"
@@ -97,24 +121,29 @@ export default function Register() {
           type="email"
           required
           autoComplete="email"
+          readOnly={esGoogle}
           value={email}
           onChange={(event) => setEmail(event.target.value)}
           placeholder="tu@email.com"
         />
         {fieldErrors.email && <span className="auth-field-error">{fieldErrors.email}</span>}
 
-        <label htmlFor="register-password">Contraseña</label>
-        <input
-          id="register-password"
-          type="password"
-          required
-          minLength={6}
-          autoComplete="new-password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          placeholder="Minimo 6 caracteres"
-        />
-        {fieldErrors.password && <span className="auth-field-error">{fieldErrors.password}</span>}
+        {!esGoogle && (
+          <>
+            <label htmlFor="register-password">Contraseña</label>
+            <input
+              id="register-password"
+              type="password"
+              required
+              minLength={6}
+              autoComplete="new-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Minimo 6 caracteres"
+            />
+            {fieldErrors.password && <span className="auth-field-error">{fieldErrors.password}</span>}
+          </>
+        )}
 
         <label htmlFor="register-country">País</label>
         <select
@@ -177,7 +206,7 @@ export default function Register() {
         {error && <p className="auth-error" role="alert">{error}</p>}
 
         <button type="submit" disabled={cargando} className="auth-submit">
-          {cargando ? "Creando cuenta" : "Crear cuenta"}
+          {cargando ? "Creando cuenta" : esGoogle ? "Completar registro" : "Crear cuenta"}
         </button>
       </form>
 

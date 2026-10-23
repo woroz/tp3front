@@ -1,13 +1,19 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AuthLayout } from "../components/authLayout";
 import { useAuth } from "../context/authContext";
-import { login } from "../services/api";
+import { login, urlLoginGoogle } from "../services/api";
+import googleLogo from "../assets/google.svg";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [searchParams] = useSearchParams();
+  const [error, setError] = useState(
+    searchParams.get("error") === "google"
+      ? "No pudimos iniciar sesion con google, proba de nuevo."
+      : ""
+  );
   const [fieldErrors, setFieldErrors] = useState({});
   const [cargando, setCargando] = useState(false);
   const navigate = useNavigate();
@@ -77,6 +83,13 @@ export default function Login() {
           {cargando ? "Ingresando" : "Iniciar sesión"}
         </button>
       </form>
+       <button
+        type="button"
+        className="auth-google"
+        onClick={() => { window.location.href = urlLoginGoogle(); }}>
+        <img src={googleLogo} alt="" width="18" height="18" />
+        Continuar con Google
+      </button>
 
       <p className="auth-switch">
         ¿No tenes cuenta?{" "}

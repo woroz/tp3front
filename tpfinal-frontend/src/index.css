@@ -259,6 +259,26 @@ select {
   transition: background .2s, transform .2s;
 }
 
+.auth-google {
+  width: 100%;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #d0d5dd;
+  border-radius: 10px;
+  background: #fff;
+  color: #1f2937;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.auth-google:hover { 
+  background: #f3f4f6; 
+}
+
 .auth-submit:hover { background: #2f5cbb; transform: translateY(-1px); }
 .auth-submit:disabled { cursor: wait; opacity: .65; transform: none; }
 .auth-submit span { font-size: 18px; line-height: 1; }

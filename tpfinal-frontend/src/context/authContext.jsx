@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useState } from "react";
-import { obtenerPerfil } from "../services/api";
+import { obtenerPerfil, refrescarSesion } from "../services/api";
 
 const AuthContext = createContext(null);
 
@@ -92,6 +92,14 @@ export function AuthProvider({ children }) {
     );
   }
 
+  async function sesionDesdeRefresh() {
+    const { accessToken } = await refrescarSesion();
+    guardarSesion({ token: accessToken });
+    const payload = decodificarToken(accessToken);
+    localStorage.setItem("user", JSON.stringify(payload));
+    return payload;
+  }
+
   function cerrarSesion() {
     localStorage.removeItem("token");
     localStorage.removeItem("refreshToken");
@@ -114,6 +122,7 @@ export function AuthProvider({ children }) {
     estaAutenticado: !!token,
     cargandoSesion,
     guardarSesion,
+    sesionDesdeRefresh,
     cerrarSesion,
     actualizarUsuario,
   };

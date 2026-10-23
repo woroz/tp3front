@@ -74,6 +74,47 @@ export async function register(email, password, nombre, rol, direccion, ubicacio
   if (!res.ok) throw new Error(data.message);
   return data;
 }
+
+export function urlLoginGoogle() {
+  return `${API_URL}/auth/google`;
+}
+
+export async function obtenerDatosGooglePendiente() {
+  const res = await fetch(`${API_URL}/auth/google/pendiente`, {
+    credentials: "include",
+  });
+  const data = await readResponse(res);
+  if (!res.ok) throw new Error(data.message);
+  return data;
+}
+
+export async function registrarConGoogle(rol, direccion, ubicacion = {}) {
+  const res = await fetch(`${API_URL}/auth/google/registro`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({
+      rol,
+      direccion,
+      pais: ubicacion.pais,
+      provincia: ubicacion.provincia,
+      ciudad: ubicacion.ciudad,
+    }),
+  });
+  const data = await readResponse(res);
+  if (!res.ok) throw new Error(data.message);
+  return data;
+}
+
+export async function refrescarSesion() {
+  const res = await fetch(`${API_URL}/auth/refresh-token`, {
+    method: "POST",
+    credentials: "include",
+  });
+  const data = await readResponse(res);
+  if (!res.ok) throw new Error(data.message);
+  return data;
+}
  
 export async function obtenerPerfil() {
   return request("/perfil");
